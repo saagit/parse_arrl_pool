@@ -184,16 +184,25 @@ ASK_QUESTIONS_HELP = (
                             'all incorrectly answered and unanswered '
                             'questions will be immediately output.')) +
     '\n')
+
+class WinTooSmallError(Exception):
+    """Signal that the terminal window is too small."""
+    pass
+
 def ask_questions(stdscr: Window, questions: dict[str, Question]) -> None:
     """Use curses to test the user.
 
     Any questions answered correctly will not be output.
     """
 
+    curses.use_default_colors()
     stdscr.clear()
 
-    # TODO higher contrast color
-    # https://stackoverflow.com/questions/14514137/python-curses-and-the-default-black-color
+    rows, cols = stdscr.getmaxyx()
+    if rows < 24 or cols < 80:
+        raise WinTooSmallError
+
+    # TODO shuffle answer options
     qnums = list(questions.keys())
     q_num = len(qnums)
     q_right = 0
@@ -251,7 +260,12 @@ def main() -> int:
     questions = parse_questions(txt)
 
     if args.ask_questions:
-        curses.wrapper(ask_questions, questions)
+        try:
+            curses.wrapper(ask_questions, questions)
+        except WinTooSmallError:
+            print(f'The terminal window must be at least 80x24.',
+                  file=sys.stderr)
+            return 1
 
     if args.verbose:
         print(f'Outputting {len(questions)} questions.', file=sys.stderr)
