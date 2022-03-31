@@ -35,6 +35,7 @@ import re
 import sys
 import textwrap
 from typing import TYPE_CHECKING
+from typing import List
 from xml.etree.cElementTree import XML
 import zipfile
 
@@ -71,23 +72,22 @@ def get_txt_from_docx(filename: str) -> str:
 
     return '\n\n'.join(paragraphs)
 
-def get_txt_from_file(filename: str) -> str:
+def get_txt_from_file(filenames: List[str]) -> str:
     """Return the text extracted from the filename passed
 
     The filename can refer to either a .pdf, .docx or .txt file.
     """
-    try:
-        return extract_text(filename)
-    except PDFSyntaxError:
-        pass
-
-    try:
-        return get_txt_from_docx(filename)
-    except zipfile.BadZipFile:
-        pass
-
-    with open(filename) as txt_file:
-        return txt_file.read()
+    txt = ''
+    for filename in filenames:
+        try:
+            txt += extract_text(filename)
+        except PDFSyntaxError:
+            try:
+                txt += get_txt_from_docx(filename)
+            except zipfile.BadZipFile:
+                with open(filename) as txt_file:
+                    txt += txt_file.read()
+    return txt
 
 def cleanup_txt(txt: str) -> str:
     """Returned a cleaned-up version of the passed txt
@@ -171,6 +171,7 @@ def parse_questions(txt: str) -> dict[str, Question]:
     questions = {}
     for match in QA_RE.finditer(txt):
         key = match.group('QuestionNumber')
+        # TODO check for duplicate questions
         questions[key] = Question(match)
     return questions
 
@@ -187,7 +188,6 @@ ASK_QUESTIONS_HELP = (
 
 class WinTooSmallError(Exception):
     """Signal that the terminal window is too small."""
-    pass
 
 def ask_questions(stdscr: Window, questions: dict[str, Question]) -> None:
     """Use curses to test the user.
@@ -253,17 +253,18 @@ def main() -> int:
     argp.add_argument('-o', '--output-file',
                       type=argparse.FileType('w'), default=sys.stdout)
     argp.add_argument('-v', '--verbose', action='store_true')
-    argp.add_argument('pool_pdf_or_docx_or_txt')
+    argp.add_argument('question_pools', nargs='*',
+                      help='.docx, .pdf or .txt containing a question pool')
     args = argp.parse_args()
 
-    txt = cleanup_txt(get_txt_from_file(args.pool_pdf_or_docx_or_txt))
+    txt = cleanup_txt(get_txt_from_file(args.question_pools))
     questions = parse_questions(txt)
 
     if args.ask_questions:
         try:
             curses.wrapper(ask_questions, questions)
         except WinTooSmallError:
-            print(f'The terminal window must be at least 80x24.',
+            print('The terminal window must be at least 80x24.',
                   file=sys.stderr)
             return 1
 
