@@ -159,13 +159,32 @@ class Question():
         # Wrap the text of the question
         question_text = '\n'.join(self.q_wrapper.wrap(self.question))
 
-        # TODO Properly shuffle choices
         if not shuffle_abcd:
-            choice_lookup = {'A': 'A', 'B': 'B', 'C': 'C', 'D': 'D'}
+            # A is A, B is B, etc.
+            choice_lookup = {
+                'A': 'A',
+                'B': 'B',
+                'C': 'C',
+                'D': 'D'
+            }
         elif self.all_choices_correct_re.match(self.choices['D']):
-            choice_lookup = {'A': 'B', 'B': 'C', 'C': 'A', 'D': 'D'}
+            # Leave "All choices are correct" as D, but shuffle A, B and C.
+            shuffled_choices = random.sample('ABC', 3)
+            choice_lookup = {
+                'A': shuffled_choices[0],
+                'B': shuffled_choices[1],
+                'C': shuffled_choices[2],
+                'D': 'D'
+            }
         else:
-            choice_lookup = {'A': 'B', 'B': 'C', 'C': 'D', 'D': 'A'}
+            # Shuffle all four choices
+            shuffled_choices = random.sample('ABCD', 4)
+            choice_lookup = {
+                'A': shuffled_choices[0],
+                'B': shuffled_choices[1],
+                'C': shuffled_choices[2],
+                'D': shuffled_choices[3]
+            }
 
         choices = {}
         for original_choice in choice_lookup:
