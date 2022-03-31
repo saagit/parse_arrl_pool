@@ -150,6 +150,7 @@ class Question():
     def question_to_ask(self) -> str:
         "Returns a string that asks the question."
         q_txt = '\n'.join(self.q_wrapper.wrap(self.question))
+
         opt_a_txt = '\n'.join(self.a_wrapper.wrap(f'A. {self.option_a}'))
         opt_b_txt = '\n'.join(self.a_wrapper.wrap(f'B. {self.option_b}'))
         opt_c_txt = '\n'.join(self.a_wrapper.wrap(f'C. {self.option_c}'))
@@ -191,6 +192,8 @@ def ask_questions(stdscr: Window, questions: dict[str, Question]) -> None:
 
     stdscr.clear()
 
+    # TODO higher contrast color
+    # https://stackoverflow.com/questions/14514137/python-curses-and-the-default-black-color
     qnums = list(questions.keys())
     q_num = len(qnums)
     q_right = 0
@@ -209,31 +212,35 @@ def ask_questions(stdscr: Window, questions: dict[str, Question]) -> None:
                       f'{q_num - q_right - q_wrong - q_skipped}\n\n')
         stdscr.addstr(qobj.question_to_ask())
 
+        pos_y, pos_x = stdscr.getyx()
         while True:
-            stdscr.addstr('\n[abcdsq]: ')
+            stdscr.addstr('\n[abcdsq?]: ')
             ans = stdscr.getkey().upper()
             if ans in 'ABCDSQ':
                 break
             stdscr.addstr(ASK_QUESTIONS_HELP)
+            stdscr.move(pos_y, pos_x)
 
+        stdscr.clrtobot()
+        stdscr.addch(ans)
         if ans == 'Q':
             return
         if ans == qobj.answer:
             q_right += 1
             del questions[key]
-        elif ans == 'S':
-            q_skipped += 1
         else:
-            q_wrong += 1
-            stdscr.addstr(f'\nYou answered {ans}.  '
-                          f'The correct answer is {qobj.answer}.\n')
+            if ans == 'S':
+                q_skipped += 1
+            else:
+                q_wrong += 1
+            stdscr.addstr(f'\nThe correct answer is {qobj.answer}.\n')
             stdscr.addstr('Press a key to continue.')
             ans = stdscr.getkey()
 
 def main() -> int:
     """The main event."""
     argp = argparse.ArgumentParser()
-    argp.add_argument('-q', '--ask-questions', action='store_true')
+    argp.add_argument('-a', '--ask-questions', action='store_true')
     argp.add_argument('-o', '--output-file',
                       type=argparse.FileType('w'), default=sys.stdout)
     argp.add_argument('-v', '--verbose', action='store_true')
