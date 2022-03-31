@@ -36,6 +36,7 @@ import sys
 import textwrap
 from typing import TYPE_CHECKING
 from typing import List
+from typing import Tuple
 from xml.etree.cElementTree import XML
 import zipfile
 
@@ -121,19 +122,18 @@ class Question():
         self.answer = match_obj.group('Answer')
         self.regulation = match_obj.group('Regulation')
         self.question = ' '.join(match_obj.group('Question').split())
-        self.option_a = ' '.join(match_obj.group('OptionA').split())
-        self.option_b = ' '.join(match_obj.group('OptionB').split())
-        self.option_c = ' '.join(match_obj.group('OptionC').split())
-        self.option_d = ' '.join(match_obj.group('OptionD').split())
+        self.options = {}
+        self.options['A'] = ' '.join(match_obj.group('OptionA').split())
+        self.options['B'] = ' '.join(match_obj.group('OptionB').split())
+        self.options['C'] = ' '.join(match_obj.group('OptionC').split())
+        self.options['D'] = ' '.join(match_obj.group('OptionD').split())
 
         assert self.answer
         if not self.regulation or self.regulation.isspace():
             self.regulation = ''
         assert self.question
-        assert self.option_a
-        assert self.option_b
-        assert self.option_c
-        assert self.option_d
+        for option in self.options.values():
+            assert option
 
         self.q_wrapper = textwrap.TextWrapper()
         self.a_wrapper = textwrap.TextWrapper(initial_indent='   ',
@@ -142,10 +142,10 @@ class Question():
     def __str__(self) -> str:
         return (f'{self.question_number} ({self.answer}){self.regulation}\n'
                 f'{self.question}\n'
-                f'A. {self.option_a}\n'
-                f'B. {self.option_b}\n'
-                f'C. {self.option_c}\n'
-                f'D. {self.option_d}\n'
+                f'A. {self.options["A"]}\n'
+                f'B. {self.options["B"]}\n'
+                f'C. {self.options["C"]}\n'
+                f'D. {self.options["D"]}\n'
                 f'~~')
 
     def __eq__(self, other: object) -> bool:
@@ -153,20 +153,31 @@ class Question():
             return NotImplemented
         return str(self) == str(other)
 
-    def question_to_ask(self) -> str:
+    def generate_question(self, shuffle_abcd: bool) -> Tuple[str, str]:
         "Returns a string that asks the question."
         q_txt = '\n'.join(self.q_wrapper.wrap(self.question))
 
-        opt_a_txt = '\n'.join(self.a_wrapper.wrap(f'A. {self.option_a}'))
-        opt_b_txt = '\n'.join(self.a_wrapper.wrap(f'B. {self.option_b}'))
-        opt_c_txt = '\n'.join(self.a_wrapper.wrap(f'C. {self.option_c}'))
-        opt_d_txt = '\n'.join(self.a_wrapper.wrap(f'D. {self.option_d}'))
-        return (f'{self.question_number}\n'
-                f'{q_txt}\n'
-                f'{opt_a_txt}\n'
-                f'{opt_b_txt}\n'
-                f'{opt_c_txt}\n'
-                f'{opt_d_txt}\n')
+        # TODO Properly shuffle options
+        if not shuffle_abcd:
+            new_opt = {'A': 'A', 'B': 'B', 'C': 'C', 'D': 'D'}
+        elif (self.options['D'].startswith('All ') and
+              self.options['D'].endswith(' correct')):
+            new_opt = {'A': 'B', 'B': 'C', 'C': 'A', 'D': 'D'}
+        else:
+            new_opt = {'A': 'B', 'B': 'C', 'C': 'D', 'D': 'A'}
+
+        opt_txt = {}
+        for key in new_opt:
+            opt = new_opt[key]
+            raw_txt = f'{opt}. {self.options[key]}'
+            opt_txt[opt] = '\n'.join(self.a_wrapper.wrap(raw_txt))
+
+        return (new_opt[self.answer], (f'{self.question_number}\n'
+                                         f'{q_txt}\n'
+                                         f'{opt_txt["A"]}\n'
+                                         f'{opt_txt["B"]}\n'
+                                         f'{opt_txt["C"]}\n'
+                                         f'{opt_txt["D"]}\n'))
 
 class TwoQuestionsWithSameNumber(Exception):
     """Two different questions with the same number were seen."""
@@ -200,7 +211,9 @@ ASK_QUESTIONS_HELP = (
 class WinTooSmallError(Exception):
     """Signal that the terminal window is too small."""
 
-def ask_questions(stdscr: Window, questions: dict[str, Question]) -> None:
+def ask_questions(stdscr: Window,
+                  questions: dict[str, Question],
+                  shuffle_abcd: bool) -> None:
     """Use curses to test the user.
 
     Any questions answered correctly will not be output.
@@ -213,7 +226,6 @@ def ask_questions(stdscr: Window, questions: dict[str, Question]) -> None:
     if rows < 24 or cols < 80:
         raise WinTooSmallError
 
-    # TODO shuffle answer options
     qnums = list(questions.keys())
     q_num = len(qnums)
     q_right = 0
@@ -230,7 +242,8 @@ def ask_questions(stdscr: Window, questions: dict[str, Question]) -> None:
         stdscr.addstr(f'               skipped: {q_skipped}\n')
         stdscr.addstr(f'             remaining: '
                       f'{q_num - q_right - q_wrong - q_skipped}\n\n')
-        stdscr.addstr(qobj.question_to_ask())
+        correct_answer, question_txt = qobj.generate_question(shuffle_abcd)
+        stdscr.addstr(question_txt)
 
         pos_y, pos_x = stdscr.getyx()
         while True:
@@ -245,7 +258,7 @@ def ask_questions(stdscr: Window, questions: dict[str, Question]) -> None:
         stdscr.addch(ans)
         if ans == 'Q':
             return
-        if ans == qobj.answer:
+        if ans == correct_answer:
             q_right += 1
             del questions[key]
         else:
@@ -253,7 +266,7 @@ def ask_questions(stdscr: Window, questions: dict[str, Question]) -> None:
                 q_skipped += 1
             else:
                 q_wrong += 1
-            stdscr.addstr(f'\nThe correct answer is {qobj.answer}.\n')
+            stdscr.addstr(f'\nThe correct answer is {correct_answer}.\n')
             stdscr.addstr('Press a key to continue.')
             ans = stdscr.getkey()
 
@@ -261,6 +274,7 @@ def main() -> int:
     """The main event."""
     argp = argparse.ArgumentParser()
     argp.add_argument('-a', '--ask-questions', action='store_true')
+    argp.add_argument('-s', '--shuffle-abcd', action='store_true')
     argp.add_argument('-o', '--output-file',
                       type=argparse.FileType('w'), default=sys.stdout)
     argp.add_argument('-v', '--verbose', action='store_true')
@@ -273,7 +287,7 @@ def main() -> int:
 
     if args.ask_questions:
         try:
-            curses.wrapper(ask_questions, questions)
+            curses.wrapper(ask_questions, questions, args.shuffle_abcd)
         except WinTooSmallError:
             print('The terminal window must be at least 80x24.',
                   file=sys.stderr)
