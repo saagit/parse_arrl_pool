@@ -51,24 +51,24 @@ else:
     from typing import Any # pylint: disable=ungrouped-imports
     Window = Any
 
-def cleanup_txt(txt: str) -> str:
-    """Returned a cleaned-up version of the passed txt
+def cleanup_text(text: str) -> str:
+    """Returned a cleaned-up version of the passed text
 
-    Any header, errata, etc. from the beginning of txt will be removed
-    and then Unicode characters (e.g. quotes and dashes) in the txt
+    Any header, errata, etc. from the beginning of text will be removed
+    and then Unicode characters (e.g. quotes and dashes) in the text
     are decoded into ASCII.  The result is returned.
     """
-    to_skip = txt.find('SUBELEMENT')
+    to_skip = text.find('SUBELEMENT')
     if to_skip > 0:
-        txt = txt[to_skip:]
-    return unidecode(txt)
+        text = text[to_skip:]
+    return unidecode(text)
 
 WORD_NAMESPACE = ('{http://schemas.openxmlformats.org/'
                   'wordprocessingml/2006/main}')
 PARA = WORD_NAMESPACE + 'p'
 TEXT = WORD_NAMESPACE + 't'
 
-def get_txt_from_docx(filename: str) -> str:
+def get_text_from_docx(filename: str) -> str:
     """Return the text extracted from the passed .docx filename"""
     document = zipfile.ZipFile(filename)
     xml_content = document.read('word/document.xml')
@@ -85,36 +85,40 @@ def get_txt_from_docx(filename: str) -> str:
 
     return '\n\n'.join(paragraphs)
 
-def get_txt_from_file(filenames: List[str]) -> str:
+def get_text_from_file(filenames: List[str]) -> str:
     """Return the text extracted from the filename passed
 
     The filename can refer to either a .pdf, .docx or .txt file.
     """
-    all_txt = ''
+    all_text = ''
     for filename in filenames:
         try:
-            file_txt = extract_text(filename)
+            file_text = extract_text(filename)
         except PDFSyntaxError:
             try:
-                file_txt = get_txt_from_docx(filename)
+                file_text = get_text_from_docx(filename)
             except zipfile.BadZipFile:
-                with open(filename) as txt_file:
-                    file_txt = txt_file.read()
-        all_txt += cleanup_txt(file_txt)
-    return all_txt
+                with open(filename) as text_file:
+                    file_text = text_file.read()
+        all_text += cleanup_text(file_text)
+    return all_text
 
 QA_RE = re.compile(r'(?P<QuestionNumber>[TGE][0-9][A-Z][0-9]{2}) ?'
                    r'\((?P<Answer>[A-D])\)'
                    r'(?P<Regulation>\s*?\[[^]]+?\])?\s*?'
                    r'(?P<Question>[^~]+?)\s*?'
-                   r'A\. *?(?P<OptionA>[^~]+?)\s*?'
-                   r'B\. *?(?P<OptionB>[^~]+?)\s*?'
-                   r'C\. *?(?P<OptionC>[^~]+?)\s*?'
-                   r'D\. *?(?P<OptionD>[^~]+?)\s*?~+')
+                   r'A\. *?(?P<ChoiceA>[^~]+?)\s*?'
+                   r'B\. *?(?P<ChoiceB>[^~]+?)\s*?'
+                   r'C\. *?(?P<ChoiceC>[^~]+?)\s*?'
+                   r'D\. *?(?P<ChoiceD>[^~]+?)\s*?~+')
 
 class Question():
     """A container to hold information about a single question."""
-    # pylint: disable=too-many-instance-attributes
+    q_wrapper = textwrap.TextWrapper()
+    a_wrapper = textwrap.TextWrapper(initial_indent='   ',
+                                     subsequent_indent='      ')
+    all_choices_correct_re = re.compile('^All .* correct$')
+
     def __init__(self, match_obj: re.Match[str]) -> None:
         self.question_number = match_obj.group('QuestionNumber')
         assert len(self.question_number)
@@ -122,30 +126,26 @@ class Question():
         self.answer = match_obj.group('Answer')
         self.regulation = match_obj.group('Regulation')
         self.question = ' '.join(match_obj.group('Question').split())
-        self.options = {}
-        self.options['A'] = ' '.join(match_obj.group('OptionA').split())
-        self.options['B'] = ' '.join(match_obj.group('OptionB').split())
-        self.options['C'] = ' '.join(match_obj.group('OptionC').split())
-        self.options['D'] = ' '.join(match_obj.group('OptionD').split())
+        self.choices = {}
+        self.choices['A'] = ' '.join(match_obj.group('ChoiceA').split())
+        self.choices['B'] = ' '.join(match_obj.group('ChoiceB').split())
+        self.choices['C'] = ' '.join(match_obj.group('ChoiceC').split())
+        self.choices['D'] = ' '.join(match_obj.group('ChoiceD').split())
 
         assert self.answer
         if not self.regulation or self.regulation.isspace():
             self.regulation = ''
         assert self.question
-        for option in self.options.values():
-            assert option
-
-        self.q_wrapper = textwrap.TextWrapper()
-        self.a_wrapper = textwrap.TextWrapper(initial_indent='   ',
-                                              subsequent_indent='      ')
+        for choice in self.choices.values():
+            assert choice
 
     def __str__(self) -> str:
         return (f'{self.question_number} ({self.answer}){self.regulation}\n'
                 f'{self.question}\n'
-                f'A. {self.options["A"]}\n'
-                f'B. {self.options["B"]}\n'
-                f'C. {self.options["C"]}\n'
-                f'D. {self.options["D"]}\n'
+                f'A. {self.choices["A"]}\n'
+                f'B. {self.choices["B"]}\n'
+                f'C. {self.choices["C"]}\n'
+                f'D. {self.choices["D"]}\n'
                 f'~~')
 
     def __eq__(self, other: object) -> bool:
@@ -155,46 +155,48 @@ class Question():
 
     def generate_question(self, shuffle_abcd: bool) -> Tuple[str, str]:
         "Returns a string that asks the question."
-        q_txt = '\n'.join(self.q_wrapper.wrap(self.question))
 
-        # TODO Properly shuffle options
+        # Wrap the text of the question
+        question_text = '\n'.join(self.q_wrapper.wrap(self.question))
+
+        # TODO Properly shuffle choices
         if not shuffle_abcd:
-            new_opt = {'A': 'A', 'B': 'B', 'C': 'C', 'D': 'D'}
-        elif (self.options['D'].startswith('All ') and
-              self.options['D'].endswith(' correct')):
-            new_opt = {'A': 'B', 'B': 'C', 'C': 'A', 'D': 'D'}
+            choice_lookup = {'A': 'A', 'B': 'B', 'C': 'C', 'D': 'D'}
+        elif self.all_choices_correct_re.match(self.choices['D']):
+            choice_lookup = {'A': 'B', 'B': 'C', 'C': 'A', 'D': 'D'}
         else:
-            new_opt = {'A': 'B', 'B': 'C', 'C': 'D', 'D': 'A'}
+            choice_lookup = {'A': 'B', 'B': 'C', 'C': 'D', 'D': 'A'}
 
-        opt_txt = {}
-        for key in new_opt:
-            opt = new_opt[key]
-            raw_txt = f'{opt}. {self.options[key]}'
-            opt_txt[opt] = '\n'.join(self.a_wrapper.wrap(raw_txt))
+        choices = {}
+        for original_choice in choice_lookup:
+            raw_text = (f'{choice_lookup[original_choice]}. '
+                        f'{self.choices[original_choice]}')
+            choices[choice_lookup[original_choice]] = (
+                '\n'.join(self.a_wrapper.wrap(raw_text)))
 
-        return (new_opt[self.answer], (f'{self.question_number}\n'
-                                         f'{q_txt}\n'
-                                         f'{opt_txt["A"]}\n'
-                                         f'{opt_txt["B"]}\n'
-                                         f'{opt_txt["C"]}\n'
-                                         f'{opt_txt["D"]}\n'))
+        return (choice_lookup[self.answer], (f'{self.question_number}\n'
+                                             f'{question_text}\n'
+                                             f'{choices["A"]}\n'
+                                             f'{choices["B"]}\n'
+                                             f'{choices["C"]}\n'
+                                             f'{choices["D"]}\n'))
 
 class TwoQuestionsWithSameNumber(Exception):
     """Two different questions with the same number were seen."""
 
-def parse_questions(txt: str) -> dict[str, Question]:
-    """Returns a dictionary of Questions extracted from txt.
+def parse_questions(text: str) -> dict[str, Question]:
+    """Returns a dictionary of Questions extracted from text.
 
     The dictionary's keys are the question numbers in the order they
-    occurred in txt.
+    occurred in text.
     """
     questions: dict[str, Question] = {}
-    for match in QA_RE.finditer(txt):
+    for match in QA_RE.finditer(text):
         key = match.group('QuestionNumber')
-        question_obj = Question(match)
-        if key in questions and question_obj != questions[key]:
+        question = Question(match)
+        if key in questions and question != questions[key]:
             raise TwoQuestionsWithSameNumber(key)
-        questions[key] = question_obj
+        questions[key] = question
     return questions
 
 ASK_QUESTIONS_HELP = (
@@ -226,49 +228,49 @@ def ask_questions(stdscr: Window,
     if rows < 24 or cols < 80:
         raise WinTooSmallError
 
-    qnums = list(questions.keys())
-    q_num = len(qnums)
-    q_right = 0
-    q_wrong = 0
+    q_correct = 0
+    q_incorrect = 0
     q_skipped = 0
-    random.shuffle(qnums)
-    for key in qnums:
-        qobj = questions[key]
+    q_numbers = list(questions.keys())
+    q_numbers = random.sample(q_numbers, len(q_numbers))
+    for q_number in q_numbers:
+        question = questions[q_number]
         stdscr.clear()
 
-        stdscr.addstr(f'       total questions: {q_num}\n')
-        stdscr.addstr(f'    correctly answered: {q_right}\n')
-        stdscr.addstr(f'  incorrectly answered: {q_wrong}\n')
-        stdscr.addstr(f'               skipped: {q_skipped}\n')
-        stdscr.addstr(f'             remaining: '
-                      f'{q_num - q_right - q_wrong - q_skipped}\n\n')
-        correct_answer, question_txt = qobj.generate_question(shuffle_abcd)
-        stdscr.addstr(question_txt)
+        stdscr.addstr(f'       total questions: {len(q_numbers)}\n'
+                      f'    correctly answered: {q_correct}\n'
+                      f'  incorrectly answered: {q_incorrect}\n'
+                      f'               skipped: {q_skipped}\n'
+                      f'             remaining: '
+                      f'{len(q_numbers) - q_correct - q_incorrect - q_skipped}'
+                      f'\n\n')
+        correct_answer, question_text = question.generate_question(shuffle_abcd)
+        stdscr.addstr(question_text)
 
-        pos_y, pos_x = stdscr.getyx()
+        old_pos = stdscr.getyx()
         while True:
             stdscr.addstr('\n[abcdsq?]: ')
-            ans = stdscr.getkey().upper()
-            if ans in 'ABCDSQ':
+            their_answer = stdscr.getkey().upper()
+            if their_answer in 'ABCDSQ':
                 break
             stdscr.addstr(ASK_QUESTIONS_HELP)
-            stdscr.move(pos_y, pos_x)
+            stdscr.move(*old_pos)
 
         stdscr.clrtobot()
-        stdscr.addch(ans)
-        if ans == 'Q':
+        stdscr.addch(their_answer)
+        if their_answer == 'Q':
             return
-        if ans == correct_answer:
-            q_right += 1
-            del questions[key]
+        if their_answer == correct_answer:
+            q_correct += 1
+            del questions[q_number]
         else:
-            if ans == 'S':
+            if their_answer == 'S':
                 q_skipped += 1
             else:
-                q_wrong += 1
-            stdscr.addstr(f'\nThe correct answer is {correct_answer}.\n')
-            stdscr.addstr('Press a key to continue.')
-            ans = stdscr.getkey()
+                q_incorrect += 1
+            stdscr.addstr(f'\nThe correct answer is {correct_answer}.\n'
+                          f'Press a key to continue.')
+            their_answer = stdscr.getkey()
 
 def main() -> int:
     """The main event."""
@@ -282,8 +284,8 @@ def main() -> int:
                       help='.docx, .pdf or .txt containing a question pool')
     args = argp.parse_args()
 
-    txt = get_txt_from_file(args.question_pools)
-    questions = parse_questions(txt)
+    text = get_text_from_file(args.question_pools)
+    questions = parse_questions(text)
 
     if args.ask_questions:
         try:
@@ -295,8 +297,8 @@ def main() -> int:
 
     if args.verbose:
         print(f'Outputting {len(questions)} questions.', file=sys.stderr)
-    for key in questions:
-        print(questions[key], file=args.output_file)
+    for question_number in questions:
+        print(questions[question_number], file=args.output_file)
 
     return 0
 
