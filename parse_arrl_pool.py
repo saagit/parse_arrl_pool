@@ -50,6 +50,18 @@ else:
     from typing import Any # pylint: disable=ungrouped-imports
     Window = Any
 
+def cleanup_txt(txt: str) -> str:
+    """Returned a cleaned-up version of the passed txt
+
+    Any header, errata, etc. from the beginning of txt will be removed
+    and then Unicode characters (e.g. quotes and dashes) in the txt
+    are decoded into ASCII.  The result is returned.
+    """
+    to_skip = txt.find('SUBELEMENT')
+    if to_skip > 0:
+        txt = txt[to_skip:]
+    return unidecode(txt)
+
 WORD_NAMESPACE = ('{http://schemas.openxmlformats.org/'
                   'wordprocessingml/2006/main}')
 PARA = WORD_NAMESPACE + 'p'
@@ -77,29 +89,18 @@ def get_txt_from_file(filenames: List[str]) -> str:
 
     The filename can refer to either a .pdf, .docx or .txt file.
     """
-    txt = ''
+    all_txt = ''
     for filename in filenames:
         try:
-            txt += extract_text(filename)
+            file_txt = extract_text(filename)
         except PDFSyntaxError:
             try:
-                txt += get_txt_from_docx(filename)
+                file_txt = get_txt_from_docx(filename)
             except zipfile.BadZipFile:
                 with open(filename) as txt_file:
-                    txt += txt_file.read()
-    return txt
-
-def cleanup_txt(txt: str) -> str:
-    """Returned a cleaned-up version of the passed txt
-
-    Any header, errata, etc. from the beginning of txt will be removed
-    and then Unicode characters (e.g. quotes and dashes) in the txt
-    are decoded into ASCII.  The result is returned.
-    """
-    to_skip = txt.find('SUBELEMENT')
-    if to_skip > 0:
-        txt = txt[to_skip:]
-    return unidecode(txt)
+                    file_txt = txt_file.read()
+        all_txt += cleanup_txt(file_txt)
+    return all_txt
 
 QA_RE = re.compile(r'(?P<QuestionNumber>[TGE][0-9][A-Z][0-9]{2}) ?'
                    r'\((?P<Answer>[A-D])\)'
@@ -147,6 +148,11 @@ class Question():
                 f'D. {self.option_d}\n'
                 f'~~')
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Question):
+            return NotImplemented
+        return str(self) == str(other)
+
     def question_to_ask(self) -> str:
         "Returns a string that asks the question."
         q_txt = '\n'.join(self.q_wrapper.wrap(self.question))
@@ -162,17 +168,22 @@ class Question():
                 f'{opt_c_txt}\n'
                 f'{opt_d_txt}\n')
 
+class TwoQuestionsWithSameNumber(Exception):
+    """Two different questions with the same number were seen."""
+
 def parse_questions(txt: str) -> dict[str, Question]:
     """Returns a dictionary of Questions extracted from txt.
 
     The dictionary's keys are the question numbers in the order they
     occurred in txt.
     """
-    questions = {}
+    questions: dict[str, Question] = {}
     for match in QA_RE.finditer(txt):
         key = match.group('QuestionNumber')
-        # TODO check for duplicate questions
-        questions[key] = Question(match)
+        question_obj = Question(match)
+        if key in questions and question_obj != questions[key]:
+            raise TwoQuestionsWithSameNumber(key)
+        questions[key] = question_obj
     return questions
 
 ASK_QUESTIONS_HELP = (
@@ -257,7 +268,7 @@ def main() -> int:
                       help='.docx, .pdf or .txt containing a question pool')
     args = argp.parse_args()
 
-    txt = cleanup_txt(get_txt_from_file(args.question_pools))
+    txt = get_txt_from_file(args.question_pools)
     questions = parse_questions(txt)
 
     if args.ask_questions:
