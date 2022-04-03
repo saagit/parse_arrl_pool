@@ -51,6 +51,7 @@ else:
     from typing import Any # pylint: disable=ungrouped-imports
     Window = Any
 
+FIRST_QUESTION_RE = re.compile('[TGE]1A01 ')
 def cleanup_text(text: str) -> str:
     """Returned a cleaned-up version of the passed text
 
@@ -58,9 +59,13 @@ def cleanup_text(text: str) -> str:
     and then Unicode characters (e.g. quotes and dashes) in the text
     are decoded into ASCII.  The result is returned.
     """
-    to_skip = text.find('SUBELEMENT')
-    if to_skip > 0:
-        text = text[to_skip:]
+    search_index = 0
+    while True:
+        match = FIRST_QUESTION_RE.search(text[search_index+1:])
+        if not match:
+            break
+        search_index += match.start() + 1
+    text = text[search_index:]
     return unidecode(text)
 
 WORD_NAMESPACE = ('{http://schemas.openxmlformats.org/'
@@ -212,6 +217,7 @@ def parse_questions(text: str) -> dict[str, Question]:
     questions: dict[str, Question] = {}
     for match in QA_RE.finditer(text):
         key = match.group('QuestionNumber')
+        # TODO: Implement include/exclude command line patterns
         question = Question(match)
         if key in questions and question != questions[key]:
             raise TwoQuestionsWithSameNumber(key)
