@@ -51,7 +51,8 @@ else:
     from typing import Any # pylint: disable=ungrouped-imports
     Window = Any
 
-FIRST_QUESTION_RE = re.compile('[TGE]1A01 ')
+FIRST_QUESTION_RE = re.compile(r'[TGE]1A01 ')
+EXTRA_SPACE_RE = re.compile(r'([0-9a-z]-)\s+([a-z])', re.IGNORECASE)
 def cleanup_text(text: str) -> str:
     """Returned a cleaned-up version of the passed text
 
@@ -61,12 +62,14 @@ def cleanup_text(text: str) -> str:
     """
     search_index = 0
     while True:
-        match = FIRST_QUESTION_RE.search(text[search_index+1:])
-        if not match:
+        match_obj = FIRST_QUESTION_RE.search(text[search_index+1:])
+        if not match_obj:
             break
-        search_index += match.start() + 1
+        search_index += match_obj.start() + 1
     text = text[search_index:]
-    return unidecode(text)
+    text = unidecode(text)
+    text = EXTRA_SPACE_RE.sub(r'\1\2', text)
+    return text
 
 WORD_NAMESPACE = ('{http://schemas.openxmlformats.org/'
                   'wordprocessingml/2006/main}')
@@ -113,8 +116,10 @@ def get_text_from_file(filenames: List[str]) -> str:
             all_text += cleanup_text(file_text)
             continue
 
-        with open(filename) as text_file:
-            file_text = text_file.read()
+        with open(filename, 'rb') as text_file:
+            # Deal with some published files having an extraneous '\xFF'
+            file_bytes = text_file.read().replace(b'\xFF', b'')
+            file_text = file_bytes.decode()
             all_text += cleanup_text(file_text)
     return all_text
 
@@ -225,10 +230,10 @@ def parse_questions(text: str) -> dict[str, Question]:
     occurred in text.
     """
     questions: dict[str, Question] = {}
-    for match in QA_RE.finditer(text):
-        key = match.group('QuestionNumber')
+    for match_obj in QA_RE.finditer(text):
+        key = match_obj.group('QuestionNumber')
         # TODO: Implement include/exclude command line patterns
-        question = Question(match)
+        question = Question(match_obj)
         if key in questions and question != questions[key]:
             raise TwoQuestionsWithSameNumber(key)
         questions[key] = question
