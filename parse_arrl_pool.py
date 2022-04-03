@@ -100,12 +100,22 @@ def get_text_from_file(filenames: List[str]) -> str:
         try:
             file_text = extract_text(filename)
         except PDFSyntaxError:
-            try:
-                file_text = get_text_from_docx(filename)
-            except zipfile.BadZipFile:
-                with open(filename) as text_file:
-                    file_text = text_file.read()
-        all_text += cleanup_text(file_text)
+            pass
+        else:
+            all_text += cleanup_text(file_text)
+            continue
+
+        try:
+            file_text = get_text_from_docx(filename)
+        except zipfile.BadZipFile:
+            pass
+        else:
+            all_text += cleanup_text(file_text)
+            continue
+
+        with open(filename) as text_file:
+            file_text = text_file.read()
+            all_text += cleanup_text(file_text)
     return all_text
 
 QA_RE = re.compile(r'(?P<QuestionNumber>[TGE][0-9][A-Z][0-9]{2}) ?'
