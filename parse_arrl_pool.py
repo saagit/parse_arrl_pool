@@ -36,6 +36,7 @@ import sys
 import textwrap
 from typing import TYPE_CHECKING
 from typing import List
+from typing import Pattern
 from typing import Tuple
 from xml.etree.cElementTree import XML
 import zipfile
@@ -223,16 +224,39 @@ class Question():
 class TwoQuestionsWithSameNumber(Exception):
     """Two different questions with the same number were seen."""
 
-def parse_questions(text: str) -> dict[str, Question]:
+def text_matches_any_re(text: str, regex_list: list[Pattern[str]]) -> bool:
+    """Return True iff text matches something in regex_list."""
+    for regex in regex_list:
+        if regex.match(text):
+            return True
+    return False
+
+def parse_questions(text: str,
+                    include_strs: str,
+                    exclude_strs: str) -> dict[str, Question]:
     """Returns a dictionary of Questions extracted from text.
 
     The dictionary's keys are the question numbers in the order they
     occurred in text.
     """
+
+    if include_strs:
+        regex_list = [re.compile(re_str) for re_str in include_strs]
+    elif exclude_strs:
+        regex_list = [re.compile(re_str) for re_str in exclude_strs]
+
     questions: dict[str, Question] = {}
     for match_obj in QA_RE.finditer(text):
         key = match_obj.group('QuestionNumber')
-        # TODO: Implement include/exclude command line patterns
+
+        if include_strs:
+            if not text_matches_any_re(key, regex_list):
+                continue
+
+        elif exclude_strs:
+            if text_matches_any_re(key, regex_list):
+                continue
+
         question = Question(match_obj)
         if key in questions and question != questions[key]:
             raise TwoQuestionsWithSameNumber(key)
@@ -315,18 +339,29 @@ def ask_questions(stdscr: Window,
 def main() -> int:
     """The main event."""
     argp = argparse.ArgumentParser()
-    argp.add_argument('-a', '--ask-questions', action='store_true')
-    argp.add_argument('-s', '--shuffle-abcd', action='store_true')
-    argp.add_argument('-o', '--output-file',
+    argp.add_argument('-v', '--verbose', action='store_true',
+                      help='Print the number of questions to stderr.')
+    argp.add_argument('-a', '--ask-questions', action='store_true',
+                      help='Correctly answered questions are not output.')
+    argp.add_argument('-s', '--shuffle-abcd', action='store_true',
+                      help='Implies -a.  The multiple-choices are shuffled.')
+    argg = argp.add_mutually_exclusive_group()
+    argg.add_argument('-I', '--include', action='append', metavar='RE',
+                      help='Only include question numbers that match RE.')
+    argg.add_argument('-E', '--exclude', action='append', metavar='RE',
+                      help='Exclude any question numbers that match RE.')
+    argp.add_argument('-o', '--output-file', metavar='FILE',
+                      help='Output the questions to text FILE.',
                       type=argparse.FileType('w'), default=sys.stdout)
-    argp.add_argument('-v', '--verbose', action='store_true')
-    argp.add_argument('question_pools', nargs='*',
+    argp.add_argument('question_pools', nargs='+', metavar='POOL_FILES',
                       help='.docx, .pdf or .txt containing a question pool')
     args = argp.parse_args()
 
     text = get_text_from_file(args.question_pools)
-    questions = parse_questions(text)
+    questions = parse_questions(text, args.include, args.exclude)
 
+    if args.shuffle_abcd:
+        args.ask_questions = True
     if args.ask_questions:
         try:
             curses.wrapper(ask_questions, questions, args.shuffle_abcd)
