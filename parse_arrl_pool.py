@@ -339,6 +339,8 @@ def ask_questions(stdscr: Window,
 def main() -> int:
     """The main event."""
     argp = argparse.ArgumentParser()
+    # TODO Add --list option to output only the question numbers
+    # TODO If -v and -a, output number right/wrong/skipped
     argp.add_argument('-v', '--verbose', action='store_true',
                       help='Print the number of questions to stderr.')
     argp.add_argument('-a', '--ask-questions', action='store_true',
@@ -346,9 +348,11 @@ def main() -> int:
     argp.add_argument('-s', '--shuffle-abcd', action='store_true',
                       help='Implies -a.  The multiple-choices are shuffled.')
     argg = argp.add_mutually_exclusive_group()
-    argg.add_argument('-I', '--include', action='append', metavar='RE',
+    # TODO Add -I and -E options to read included/excluded numbers from file
+    # TODO Clarify how -i and -e regexes work (anchored to beginning)?
+    argg.add_argument('-i', '--include', action='append', metavar='RE',
                       help='Only include question numbers that match RE.')
-    argg.add_argument('-E', '--exclude', action='append', metavar='RE',
+    argg.add_argument('-e', '--exclude', action='append', metavar='RE',
                       help='Exclude any question numbers that match RE.')
     argp.add_argument('-o', '--output-file', metavar='FILE',
                       help='Output the questions to text FILE.',
